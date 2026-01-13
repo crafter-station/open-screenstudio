@@ -1,0 +1,70 @@
+name: Feature Request
+description: Suggest a feature you'd like to see in Open ScreenStudio
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest a feature! Your input helps shape the future of Open ScreenStudio.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Feature Description
+      description: Describe the feature you'd like to see
+      placeholder: I would like to be able to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: How would this feature help you? What problem does it solve?
+      placeholder: This would help me because...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Feature Category
+      description: What area of the app does this feature relate to?
+      options:
+        - Recording (screen capture, camera, audio)
+        - Editing (timeline, trimming, cuts)
+        - Effects (zoom, cursor effects, annotations)
+        - Export (formats, quality, compression)
+        - UI/UX (interface, workflow, accessibility)
+        - Performance (speed, resource usage)
+        - Integrations (cloud, sharing, other apps)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: existing-solutions
+    attributes:
+      label: Existing Solutions
+      description: Have you seen this feature in other screen recording software? How did they implement it?
+      placeholder: "I've seen this in [software name] and they..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Are there any workarounds you currently use?
+      placeholder: Currently I work around this by...
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Add any mockups, screenshots, or additional context
+    validations:
+      required: false

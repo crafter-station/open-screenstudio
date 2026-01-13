@@ -1,0 +1,74 @@
+name: Missing Feature
+description: Tell us about a feature that's missing from screen recording software
+title: "[Missing]: "
+labels: ["enhancement", "missing-feature", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Is there something you wish screen recording software could do but none of them offer? We want to know!
+
+  - type: textarea
+    id: missing-feature
+    attributes:
+      label: What's missing?
+      description: Describe the feature that doesn't exist in current screen recording tools
+      placeholder: "I wish I could..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: why-needed
+    attributes:
+      label: Why do you need this?
+      description: Explain your use case and why this feature would be valuable
+      placeholder: "This would help me..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: use-case-type
+    attributes:
+      label: Primary Use Case
+      description: What type of content do you create?
+      multiple: true
+      options:
+        - Product demos / Marketing
+        - Tutorials / Educational content
+        - Bug reports / Technical documentation
+        - Social media content
+        - Presentations
+        - Internal team communication
+        - Streaming / Live content
+        - Personal / Casual use
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current Workaround
+      description: How do you currently achieve this (if at all)?
+      placeholder: "Currently I have to use [other tool] or manually..."
+    validations:
+      required: false
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: How important is this to you?
+      options:
+        - Nice to have
+        - Would significantly improve my workflow
+        - Essential - I need this to switch
+    validations:
+      required: true
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples or References
+      description: Any mockups, examples from other software, or links that illustrate what you're looking for
+    validations:
+      required: false

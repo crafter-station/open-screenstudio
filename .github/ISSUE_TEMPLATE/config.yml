@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/your-org/open-screenstudio/discussions
+    about: For general questions and community discussions
+  - name: Discord
+    url: https://discord.gg/your-invite
+    about: Chat with the community in real-time

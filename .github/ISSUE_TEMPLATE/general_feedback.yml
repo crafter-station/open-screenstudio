@@ -1,0 +1,51 @@
+name: General Feedback
+description: Share any thoughts, ideas, or feedback about screen recording software
+title: "[Feedback]: "
+labels: ["feedback", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have thoughts that don't fit the other categories? We'd love to hear them!
+
+  - type: textarea
+    id: feedback
+    attributes:
+      label: Your Feedback
+      description: Share your thoughts, ideas, or suggestions
+    validations:
+      required: true
+
+  - type: dropdown
+    id: feedback-type
+    attributes:
+      label: Feedback Type
+      options:
+        - General suggestion
+        - Workflow idea
+        - Design / UX thought
+        - Technical consideration
+        - Community / Project direction
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: background
+    attributes:
+      label: Background
+      description: Tell us a bit about how you use screen recording software
+      placeholder: "I'm a [role] and I use screen recording for..."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: experience
+    attributes:
+      label: Your Experience Level
+      description: Help us understand your background
+      options:
+        - label: I'm a developer / technical user
+        - label: I create content professionally
+        - label: I use screen recording occasionally
+        - label: I'm interested in contributing to the project

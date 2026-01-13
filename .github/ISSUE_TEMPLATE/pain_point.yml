@@ -1,0 +1,96 @@
+name: Pain Point / Frustration
+description: Share what frustrates you about current screen recording software
+title: "[Pain Point]: "
+labels: ["feedback", "pain-point", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We want to build something better. Tell us what frustrates you about existing screen recording tools like Screen Studio, Loom, OBS, or others.
+
+  - type: textarea
+    id: frustration
+    attributes:
+      label: What frustrates you?
+      description: Describe the pain point or frustration you experience
+      placeholder: "I hate when..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: software
+    attributes:
+      label: Which software are you referring to?
+      description: Select the software where you experience this issue
+      multiple: true
+      options:
+        - Screen Studio
+        - Loom
+        - OBS
+        - Camtasia
+        - ScreenFlow
+        - CleanShot X
+        - Kap
+        - QuickTime
+        - Built-in OS recorder
+        - Other (specify below)
+    validations:
+      required: true
+
+  - type: input
+    id: other-software
+    attributes:
+      label: Other Software
+      description: If you selected "Other", please specify
+      placeholder: Software name
+    validations:
+      required: false
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: How much does this affect your workflow?
+      options:
+        - Minor annoyance
+        - Moderate frustration
+        - Major blocker
+        - Dealbreaker - made me switch/stop using
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: What area does this pain point relate to?
+      options:
+        - Pricing / Licensing
+        - Performance / Resource usage
+        - Recording quality
+        - Editing capabilities
+        - Export / Rendering
+        - User interface
+        - Learning curve
+        - Missing features
+        - Bugs / Reliability
+        - Platform support
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: ideal-solution
+    attributes:
+      label: What would the ideal solution look like?
+      description: How would you want this to work instead?
+      placeholder: "Ideally, it would..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any screenshots, examples, or additional details
+    validations:
+      required: false
