@@ -12,9 +12,14 @@ This document outlines the technical architecture, stack decisions, and implemen
 
 - [Stack Decision](#stack-decision)
 - [Architecture Overview](#architecture-overview)
+- [Project File Format](#project-file-format)
+- [Recording System](#recording-system)
+- [Input Tracking System](#input-tracking-system)
+- [Editing Model](#editing-model)
+- [Effects & Animation](#effects--animation)
 - [Technology Choices](#technology-choices)
-- [Project Structure](#project-structure)
 - [Platform APIs](#platform-apis)
+- [Project Structure](#project-structure)
 - [Key Dependencies](#key-dependencies)
 - [Implementation Phases](#implementation-phases)
 - [Open Questions](#open-questions)
@@ -92,12 +97,19 @@ Tauri/Rust has a steeper learning curve than JavaScript, which may reduce the co
 │   │                      BACKEND (Rust + Tauri)                  │   │
 │   │                                                              │   │
 │   │   ┌─────────────────────────────────────────────────────┐   │   │
-│   │   │                   Core Modules                       │   │   │
+│   │   │               Multi-Channel Recorder                 │   │   │
 │   │   │                                                      │   │   │
 │   │   │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐   │   │   │
-│   │   │  │ Screen  │ │  Audio  │ │ Cursor  │ │  Zoom   │   │   │   │
-│   │   │  │ Capture │ │ Capture │ │ Tracker │ │ Engine  │   │   │   │
+│   │   │  │ Display │ │  Audio  │ │  Input  │ │ Webcam  │   │   │   │
+│   │   │  │ Channel │ │ Channel │ │ Channel │ │ Channel │   │   │   │
 │   │   │  └─────────┘ └─────────┘ └─────────┘ └─────────┘   │   │   │
+│   │   │                      ↓                              │   │   │
+│   │   │              HLS Segment Writer                      │   │   │
+│   │   │              (fMP4, ~2s chunks)                      │   │   │
+│   │   └─────────────────────────────────────────────────────┘   │   │
+│   │                                                              │   │
+│   │   ┌─────────────────────────────────────────────────────┐   │   │
+│   │   │                   Core Modules                       │   │   │
 │   │   │                                                      │   │   │
 │   │   │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐   │   │   │
 │   │   │  │ Project │ │ Export  │ │ Effects │ │ Preview │   │   │   │
@@ -109,7 +121,7 @@ Tauri/Rust has a steeper learning curve than JavaScript, which may reduce the co
 │   │   ┌─────────────────────────────────────────────────────┐   │   │
 │   │   │              Platform Abstraction Layer              │   │   │
 │   │   │                                                      │   │   │
-│   │   │   Traits: ScreenCapture, AudioCapture, SystemInfo   │   │   │
+│   │   │   Traits: ScreenCapture, AudioCapture, InputCapture │   │   │
 │   │   └─────────────────────────────────────────────────────┘   │   │
 │   │                              │                               │   │
 │   └──────────────────────────────┼───────────────────────────────┘   │
@@ -123,7 +135,7 @@ Tauri/Rust has a steeper learning curve than JavaScript, which may reduce the co
 │   │   │  ScreenCaptureKit   │     │  Windows.Graphics   │        │   │
 │   │   │  AVFoundation       │     │  .Capture           │        │   │
 │   │   │  CoreAudio          │     │  WASAPI             │        │   │
-│   │   │  CoreGraphics       │     │  Win32 API          │        │   │
+│   │   │  CGEvent (Input)    │     │  Win32 API          │        │   │
 │   │   └─────────────────────┘     └─────────────────────┘        │   │
 │   │                                                               │   │
 │   └───────────────────────────────────────────────────────────────┘   │
@@ -134,18 +146,491 @@ Tauri/Rust has a steeper learning curve than JavaScript, which may reduce the co
 ### Data Flow
 
 ```
-Recording Flow:
-──────────────
-Screen ──► Frame Buffer ──► Cursor Overlay ──► Memory/Disk
-Audio  ──► Audio Buffer ──────────────────────► Memory/Disk
-Cursor ──► Position Log ──────────────────────► Metadata
+Recording Flow (Multi-Channel):
+──────────────────────────────
+Display  ──► fMP4 Segments ──► channel-display-0-XXXX.m4s
+System Audio ──► fMP4 Segments ──► channel-system-audio-0-XXXX.m4s
+Microphone ──► fMP4 Segments ──► channel-microphone-0-XXXX.m4s
+Webcam ──► fMP4 Segments ──► channel-webcam-0-XXXX.m4s
+Mouse Position ──► JSON Buffer ──► mousemoves-0.json
+Mouse Clicks ──► JSON Buffer ──► mouseclicks-0.json
+Keystrokes ──► JSON Buffer ──► keystrokes-0.json
+Cursor Images ──► PNG Files ──► cursors/*.png
 
 Export Flow:
 ────────────
-Project ──► Effect Pipeline ──► Zoom/Smooth ──► Compositor ──► Encoder ──► File
-                                                     ▲
-                                              Background/Style
+Project ──► Load Segments ──► Effect Pipeline ──► Zoom/Smooth ──► Compositor ──► Encoder ──► File
+                                                       ▲
+                                                Background/Style
 ```
+
+---
+
+## Project File Format
+
+Open ScreenStudio uses a **directory bundle** format (`.osp`) for maximum transparency and debuggability.
+
+### Bundle Structure
+
+```
+project.osp/
+├── meta.json                   # Version info and metadata
+├── project.json                # Main project configuration
+├── markers.json                # User-defined markers
+└── recording/                  # All captured data
+    ├── metadata.json           # Recording configuration and session info
+    │
+    │   # Cursor Data
+    ├── cursors.json            # Cursor type definitions
+    ├── cursors/                # Cursor image assets
+    │   ├── arrow.png
+    │   ├── iBeam.png
+    │   ├── pointingHand.png
+    │   └── ...
+    │
+    │   # Input Tracking (per session)
+    ├── mousemoves-0.json       # High-frequency mouse positions (~120Hz)
+    ├── mouseclicks-0.json      # Click events
+    ├── keystrokes-0.json       # Keyboard events
+    │
+    │   # Media Streams (HLS/fMP4 segments)
+    ├── channel-display-0.m3u8
+    ├── channel-display-0-0000.mp4    # Init segment
+    ├── channel-display-0-0001.m4s    # ~2s video segments
+    ├── channel-display-0-0002.m4s
+    │   ...
+    ├── channel-system-audio-0.m3u8
+    ├── channel-system-audio-0-XXXX.m4s
+    │
+    ├── channel-microphone-0.m3u8
+    ├── channel-microphone-0-XXXX.m4s
+    │
+    ├── channel-webcam-0.m3u8
+    ├── channel-webcam-0-XXXX.m4s
+    │
+    └── recording.log           # Debug/diagnostic log
+```
+
+### meta.json
+
+```json
+{
+  "version": "0.1.0",
+  "format": "osp-v1",
+  "createdAt": "2026-01-01T05:09:11.188Z",
+  "updatedAt": "2026-01-01T06:42:59.929Z"
+}
+```
+
+### project.json
+
+```json
+{
+  "id": "unique-project-id",
+  "name": "My Recording",
+  "createdAt": "2026-01-01T05:09:11.159Z",
+  "config": {
+    "background": {
+      "type": "gradient",
+      "gradient": {
+        "start": { "x": 0, "y": 0 },
+        "end": { "x": 1, "y": 1 },
+        "stops": [
+          { "color": "#3F37C9", "at": 0 },
+          { "color": "#8C87DF", "at": 1 }
+        ]
+      }
+    },
+    "padding": { "top": 0, "right": 0, "bottom": 0, "left": 0 },
+    "shadow": {
+      "intensity": 0.75,
+      "angle": 90,
+      "distance": 25,
+      "blur": 20
+    },
+    "cursor": {
+      "size": 1.5,
+      "smoothing": {
+        "enabled": true,
+        "spring": { "stiffness": 470, "damping": 70, "mass": 3 }
+      },
+      "hideAfterMs": null
+    },
+    "camera": {
+      "enabled": true,
+      "position": "bottom-right",
+      "size": 0.35,
+      "roundness": 0.25,
+      "mirror": false
+    },
+    "audio": {
+      "systemVolume": 1,
+      "microphoneVolume": 1,
+      "enhanceMicrophone": true
+    },
+    "recordingRange": [0, 92937.68],
+    "outputAspectRatio": { "x": 16, "y": 9 }
+  },
+  "scenes": [
+    {
+      "id": "scene-1",
+      "name": "Default",
+      "type": "recording",
+      "sessionIndex": 0,
+      "slices": [
+        {
+          "id": "slice-1",
+          "sourceStartMs": 0,
+          "sourceEndMs": 92937.68,
+          "timeScale": 1,
+          "volume": 1,
+          "hideCursor": false,
+          "disableCursorSmoothing": false
+        }
+      ],
+      "zoomRanges": [
+        {
+          "id": "zoom-1",
+          "startTime": 33007.03,
+          "endTime": 35388.93,
+          "zoom": 2,
+          "type": "follow-cursor",
+          "snapToEdges": 0.25,
+          "instant": false
+        }
+      ],
+      "layouts": [
+        {
+          "id": "layout-1",
+          "startTime": 0,
+          "endTime": 92937.68,
+          "type": "screen-with-camera",
+          "cameraSize": 0.35,
+          "cameraPosition": { "x": 1, "y": 1 }
+        }
+      ]
+    }
+  ]
+}
+```
+
+### recording/metadata.json
+
+```json
+{
+  "version": "1.0.0",
+  "state": "complete",
+  "sessions": [
+    {
+      "durationMs": 92937.68,
+      "processTimeStartMs": 1926.82,
+      "processTimeEndMs": 94864.51,
+      "unixStartMs": 1767244056884,
+      "unixEndMs": 1767244149822
+    }
+  ],
+  "channels": [
+    {
+      "id": "channel-display",
+      "type": "display",
+      "config": {
+        "displayId": 1,
+        "excludedWindowIds": []
+      },
+      "sessions": [
+        {
+          "outputFile": "channel-display-0.m3u8",
+          "bounds": { "x": 0, "y": 0, "width": 1512, "height": 982 },
+          "recordingScale": 0.5,
+          "displayRefreshRate": 120,
+          "durationMs": 92937.68
+        }
+      ]
+    },
+    {
+      "id": "channel-system-audio",
+      "type": "systemAudio",
+      "sessions": [
+        {
+          "outputFile": "channel-system-audio-0.m3u8",
+          "durationMs": 92937.68
+        }
+      ]
+    },
+    {
+      "id": "channel-microphone",
+      "type": "microphone",
+      "config": { "deviceId": "..." },
+      "sessions": [
+        {
+          "outputFile": "channel-microphone-0.m3u8",
+          "durationMs": 92937.68
+        }
+      ]
+    },
+    {
+      "id": "channel-webcam",
+      "type": "webcam",
+      "config": { "deviceId": "..." },
+      "sessions": [
+        {
+          "outputFile": "channel-webcam-0.m3u8",
+          "videoSize": { "width": 1920, "height": 1080 },
+          "frameRate": 30,
+          "durationMs": 92937.69
+        }
+      ]
+    },
+    {
+      "id": "channel-input",
+      "type": "input",
+      "config": { "captureKeystrokes": true },
+      "sessions": [
+        {
+          "mouseMovesFile": "mousemoves-0.json",
+          "mouseClicksFile": "mouseclicks-0.json",
+          "keystrokesFile": "keystrokes-0.json",
+          "durationMs": 92937.68
+        }
+      ]
+    },
+    {
+      "id": "channel-cursor",
+      "type": "cursor",
+      "cursorsInfoFile": "cursors.json",
+      "cursorImagesFolder": "cursors"
+    }
+  ]
+}
+```
+
+---
+
+## Recording System
+
+### Multi-Channel Architecture
+
+Recording captures multiple independent streams simultaneously:
+
+| Channel | Content | Format | Purpose |
+|---------|---------|--------|---------|
+| display | Screen video | fMP4/HLS | Main screen content |
+| system-audio | System audio | fMP4/HLS | App sounds, music |
+| microphone | Mic audio | fMP4/HLS | Voice narration |
+| webcam | Camera video | fMP4/HLS | Presenter overlay |
+| input | Mouse/keyboard | JSON | Cursor smoothing, zoom triggers |
+| cursor | Cursor images | PNG | Cursor rendering |
+
+### HLS/fMP4 Segmented Recording
+
+Benefits of segmented recording:
+- **Crash recovery**: Only lose the last segment on crash
+- **Streaming playback**: Preview while recording
+- **Efficient seeking**: Jump to any segment without full decode
+- **Memory efficient**: No need to buffer entire recording
+
+Segment configuration:
+- Target duration: **2 seconds**
+- Format: **fMP4** (fragmented MP4)
+- Playlist: **HLS m3u8** for segment indexing
+
+### Session Management
+
+Recordings support multiple sessions (pause/resume):
+- Each pause creates a new session
+- Sessions have independent media files
+- Timeline stitches sessions together seamlessly
+
+---
+
+## Input Tracking System
+
+### Mouse Movement Tracking
+
+Captured at display refresh rate (~120Hz on modern displays):
+
+```json
+{
+  "type": "mouseMoved",
+  "x": 272.175,
+  "y": 864.582,
+  "cursorId": "arrow",
+  "activeModifiers": [],
+  "processTimeMs": 7915.316,
+  "unixTimeMs": 1767244062872
+}
+```
+
+Fields:
+- `x`, `y`: Screen coordinates (sub-pixel precision)
+- `cursorId`: Current cursor type
+- `activeModifiers`: Keys held (shift, cmd, etc.)
+- `processTimeMs`: Recording-relative timestamp
+- `unixTimeMs`: Absolute timestamp for sync
+
+### Mouse Click Tracking
+
+```json
+{
+  "type": "mouseDown",
+  "button": "left",
+  "x": 374.152,
+  "y": 55.648,
+  "cursorId": "arrow",
+  "activeModifiers": [],
+  "processTimeMs": 26117.683,
+  "unixTimeMs": 1767244081074
+}
+```
+
+Click types: `mouseDown`, `mouseUp`
+Buttons: `left`, `right`, `middle`
+
+### Keystroke Tracking
+
+```json
+{
+  "type": "keyDown",
+  "character": "h",
+  "activeModifiers": [],
+  "isARepeat": false,
+  "processTimeMs": 55339.872,
+  "unixTimeMs": 1767244110297
+}
+```
+
+Used for:
+- Keyboard shortcut overlay
+- Transcript generation
+- Zoom triggers on typing
+
+### Cursor Image Capture
+
+```json
+{
+  "id": "arrow",
+  "hotSpot": { "x": 4, "y": 4 },
+  "standardSize": { "width": 17, "height": 23 },
+  "systemCursor": true
+}
+```
+
+- Capture all cursor variants encountered
+- Store as PNG with transparency
+- Track hotspot for accurate positioning
+
+---
+
+## Editing Model
+
+### Scene-Based Organization
+
+Projects contain one or more scenes:
+- **Recording scene**: Based on captured footage
+- **Title scene**: Static text/image (future)
+- **Transition scene**: Between scenes (future)
+
+### Timeline Slices
+
+Slices represent segments of source media with individual settings:
+
+```json
+{
+  "id": "slice-1",
+  "sourceStartMs": 0,
+  "sourceEndMs": 10000,
+  "timeScale": 1,
+  "volume": 1,
+  "hideCursor": false,
+  "disableCursorSmoothing": false
+}
+```
+
+### Zoom Ranges
+
+Define automatic zoom regions:
+
+```json
+{
+  "id": "zoom-1",
+  "startTime": 33007.03,
+  "endTime": 35388.93,
+  "zoom": 2,
+  "type": "follow-cursor",
+  "targetPoint": { "x": 0.5, "y": 0.5 },
+  "snapToEdges": 0.25,
+  "instant": false
+}
+```
+
+Zoom types:
+- `follow-cursor`: Track cursor position
+- `follow-clicks`: Center on click locations
+- `manual`: Fixed position
+
+### Layout Keyframes
+
+Define camera/screen arrangement over time:
+
+```json
+{
+  "id": "layout-1",
+  "startTime": 0,
+  "endTime": 30000,
+  "type": "screen-with-camera",
+  "cameraSize": 0.35,
+  "cameraPosition": { "x": 1, "y": 1 }
+}
+```
+
+Layout types:
+- `screen-only`: Full screen, no camera
+- `camera-only`: Full camera, no screen
+- `screen-with-camera`: Screen with camera overlay
+- `side-by-side`: Split view
+
+---
+
+## Effects & Animation
+
+### Spring Physics
+
+All smooth movements use spring physics for natural motion:
+
+```json
+{
+  "cursorMovementSpring": {
+    "stiffness": 470,
+    "damping": 70,
+    "mass": 3
+  },
+  "screenMovementSpring": {
+    "stiffness": 200,
+    "damping": 40,
+    "mass": 2.25
+  },
+  "zoomSpring": {
+    "stiffness": 700,
+    "damping": 30,
+    "mass": 1
+  }
+}
+```
+
+### Cursor Smoothing Algorithm
+
+1. Read raw mouse positions from `mousemoves-0.json`
+2. Apply spring physics simulation
+3. Interpolate between frames at output framerate
+4. Handle edge cases (teleporting cursor, edge of screen)
+
+### Automatic Zoom Algorithm
+
+1. Detect click events from `mouseclicks-0.json`
+2. Group nearby clicks within time window
+3. Calculate zoom region to encompass click group
+4. Apply spring physics for smooth zoom transition
+5. Snap to screen edges if close enough
 
 ---
 
@@ -157,8 +642,9 @@ Project ──► Effect Pipeline ──► Zoom/Smooth ──► Compositor ─
 |-----------|------------|---------|
 | **Framework** | Tauri 2.0 | App framework, IPC, windowing |
 | **Async Runtime** | Tokio | Async I/O, timers |
-| **Video Encoding** | FFmpeg (ffmpeg-next) | Encode to MP4, GIF |
-| **Serialization** | Serde | JSON for IPC and project files |
+| **Video Encoding** | FFmpeg (ffmpeg-next) | Encode to MP4, GIF, fMP4 segments |
+| **HLS** | Custom | M3U8 playlist generation |
+| **Serialization** | Serde | JSON for project files |
 | **Error Handling** | thiserror, anyhow | Ergonomic error types |
 
 ### Frontend (TypeScript)
@@ -170,145 +656,15 @@ Project ──► Effect Pipeline ──► Zoom/Smooth ──► Compositor ─
 | **Build Tool** | Vite | Fast HMR, optimized builds |
 | **Styling** | Tailwind CSS | Utility-first CSS |
 | **State** | Zustand | Lightweight state management |
+| **Video Playback** | hls.js | HLS segment playback |
 | **Icons** | Lucide React | Consistent iconography |
 
 ### Platform Requirements
 
 | Platform | Minimum Version | Reason |
 |----------|-----------------|--------|
-| **macOS** | 13.0 (Ventura) | ScreenCaptureKit improvements, modern Swift concurrency |
-| **Windows** | 11 | Windows.Graphics.Capture stability, modern UI |
-
----
-
-## Project Structure
-
-```
-open-screenstudio/
-├── .github/
-│   ├── workflows/
-│   │   ├── ci.yml                 # Lint, test, build
-│   │   ├── release.yml            # Build and publish releases
-│   │   └── pr-check.yml           # PR validation
-│   └── ISSUE_TEMPLATE/
-│
-├── docs/
-│   ├── VISION.md
-│   ├── FEATURES.md
-│   ├── ROADMAP.md
-│   ├── TECHNICAL_PLAN.md          # This file
-│   └── ARCHITECTURE.md            # Detailed architecture docs
-│
-├── src/                           # React frontend
-│   ├── components/
-│   │   ├── ui/                    # Generic UI components
-│   │   │   ├── Button.tsx
-│   │   │   ├── Slider.tsx
-│   │   │   └── ...
-│   │   ├── recording/             # Recording-specific components
-│   │   │   ├── SourcePicker.tsx
-│   │   │   ├── RecordingControls.tsx
-│   │   │   └── AudioMeter.tsx
-│   │   ├── editor/                # Editor components
-│   │   │   ├── Timeline.tsx
-│   │   │   ├── Preview.tsx
-│   │   │   ├── PropertiesPanel.tsx
-│   │   │   └── ZoomRegion.tsx
-│   │   └── export/                # Export components
-│   │       ├── ExportDialog.tsx
-│   │       ├── FormatPicker.tsx
-│   │       └── ProgressBar.tsx
-│   │
-│   ├── hooks/
-│   │   ├── useRecording.ts        # Recording state and controls
-│   │   ├── useProject.ts          # Project management
-│   │   ├── useExport.ts           # Export operations
-│   │   └── useTauri.ts            # Tauri IPC helpers
-│   │
-│   ├── stores/
-│   │   ├── recordingStore.ts      # Recording state
-│   │   ├── projectStore.ts        # Current project state
-│   │   ├── settingsStore.ts       # User preferences
-│   │   └── uiStore.ts             # UI state (panels, dialogs)
-│   │
-│   ├── lib/
-│   │   ├── tauri.ts               # Tauri command wrappers
-│   │   ├── utils.ts               # Utility functions
-│   │   └── constants.ts           # App constants
-│   │
-│   ├── types/
-│   │   ├── recording.ts           # Recording types
-│   │   ├── project.ts             # Project file types
-│   │   └── events.ts              # Tauri event types
-│   │
-│   ├── App.tsx                    # Main app component
-│   ├── main.tsx                   # Entry point
-│   └── index.css                  # Global styles + Tailwind
-│
-├── src-tauri/                     # Rust backend
-│   ├── src/
-│   │   ├── main.rs                # Tauri entry point
-│   │   ├── lib.rs                 # Library exports
-│   │   │
-│   │   ├── commands/              # Tauri commands (IPC handlers)
-│   │   │   ├── mod.rs
-│   │   │   ├── recording.rs       # Start/stop/pause recording
-│   │   │   ├── project.rs         # Save/load projects
-│   │   │   ├── export.rs          # Export operations
-│   │   │   └── system.rs          # System info, permissions
-│   │   │
-│   │   ├── capture/               # Screen and audio capture
-│   │   │   ├── mod.rs
-│   │   │   ├── traits.rs          # Platform-agnostic traits
-│   │   │   ├── screen.rs          # Screen capture orchestration
-│   │   │   ├── audio.rs           # Audio capture orchestration
-│   │   │   ├── macos/             # macOS implementations
-│   │   │   │   ├── mod.rs
-│   │   │   │   ├── screen.rs      # ScreenCaptureKit
-│   │   │   │   └── audio.rs       # CoreAudio
-│   │   │   └── windows/           # Windows implementations
-│   │   │       ├── mod.rs
-│   │   │       ├── screen.rs      # Windows.Graphics.Capture
-│   │   │       └── audio.rs       # WASAPI
-│   │   │
-│   │   ├── processing/            # Video/audio processing
-│   │   │   ├── mod.rs
-│   │   │   ├── cursor.rs          # Cursor tracking and smoothing
-│   │   │   ├── zoom.rs            # Automatic zoom algorithm
-│   │   │   ├── effects.rs         # Visual effects (blur, shadow)
-│   │   │   └── compositor.rs      # Combine layers (screen, webcam, bg)
-│   │   │
-│   │   ├── export/                # Video encoding and export
-│   │   │   ├── mod.rs
-│   │   │   ├── encoder.rs         # FFmpeg encoding
-│   │   │   ├── formats.rs         # MP4, GIF, WebM configs
-│   │   │   └── presets.rs         # Export presets (YouTube, Twitter)
-│   │   │
-│   │   ├── project/               # Project management
-│   │   │   ├── mod.rs
-│   │   │   ├── file.rs            # Project file format (.osp)
-│   │   │   ├── timeline.rs        # Timeline data structures
-│   │   │   └── assets.rs          # Asset management
-│   │   │
-│   │   └── utils/                 # Shared utilities
-│   │       ├── mod.rs
-│   │       ├── error.rs           # Error types
-│   │       └── logging.rs         # Logging setup
-│   │
-│   ├── Cargo.toml                 # Rust dependencies
-│   ├── tauri.conf.json            # Tauri configuration
-│   ├── build.rs                   # Build script
-│   └── icons/                     # App icons
-│
-├── package.json                   # Node dependencies
-├── tsconfig.json                  # TypeScript config
-├── tailwind.config.js             # Tailwind config
-├── vite.config.ts                 # Vite config
-├── README.md
-├── CONTRIBUTING.md
-├── CODE_OF_CONDUCT.md
-└── LICENSE
-```
+| **macOS** | 13.0 (Ventura) | ScreenCaptureKit improvements |
+| **Windows** | 11 | Windows.Graphics.Capture stability |
 
 ---
 
@@ -322,9 +678,11 @@ open-screenstudio/
 | **Window List** | ScreenCaptureKit | SCShareableContent |
 | **System Audio** | ScreenCaptureKit | SCStreamConfiguration |
 | **Microphone** | AVFoundation | AVAudioEngine |
-| **Cursor Position** | CoreGraphics | CGEvent |
-| **Cursor Image** | CoreGraphics | CGDisplayCopyCurrentCursor (undocumented) |
-| **Permissions** | AVFoundation | Request screen recording permission |
+| **Webcam** | AVFoundation | AVCaptureSession |
+| **Cursor Position** | CGEvent | High-frequency polling |
+| **Cursor Image** | CoreGraphics | CGDisplayCopyCurrentCursor |
+| **Keyboard Events** | CGEvent | Key capture with modifiers |
+| **Permissions** | AVFoundation | Screen recording permission |
 
 ### Windows (11+)
 
@@ -334,9 +692,124 @@ open-screenstudio/
 | **Window List** | Win32 | EnumWindows |
 | **System Audio** | WASAPI | Loopback capture |
 | **Microphone** | WASAPI | Standard capture |
+| **Webcam** | Windows.Media.Capture | MediaCapture |
 | **Cursor Position** | Win32 | GetCursorPos |
 | **Cursor Image** | Win32 | GetCursorInfo |
+| **Keyboard Events** | Win32 | SetWindowsHookEx |
 | **Permissions** | Windows Settings | Prompt user if needed |
+
+---
+
+## Project Structure
+
+```
+open-screenstudio/
+├── .github/
+│   ├── workflows/
+│   │   ├── ci.yml
+│   │   ├── release.yml
+│   │   └── pr-check.yml
+│   └── ISSUE_TEMPLATE/
+│
+├── docs/
+│   ├── VISION.md
+│   ├── FEATURES.md
+│   ├── ROADMAP.md
+│   ├── TECHNICAL_PLAN.md
+│   └── ARCHITECTURE.md
+│
+├── src/                           # React frontend
+│   ├── components/
+│   │   ├── ui/
+│   │   ├── recording/
+│   │   ├── editor/
+│   │   └── export/
+│   ├── hooks/
+│   ├── stores/
+│   ├── lib/
+│   ├── types/
+│   ├── App.tsx
+│   ├── main.tsx
+│   └── index.css
+│
+├── src-tauri/                     # Rust backend
+│   ├── src/
+│   │   ├── main.rs
+│   │   ├── lib.rs
+│   │   │
+│   │   ├── commands/              # Tauri IPC handlers
+│   │   │   ├── mod.rs
+│   │   │   ├── recording.rs
+│   │   │   ├── project.rs
+│   │   │   ├── export.rs
+│   │   │   └── system.rs
+│   │   │
+│   │   ├── recorder/              # Multi-channel recording
+│   │   │   ├── mod.rs
+│   │   │   ├── coordinator.rs     # Orchestrates all channels
+│   │   │   ├── channel.rs         # Channel trait
+│   │   │   ├── display.rs         # Screen capture channel
+│   │   │   ├── audio.rs           # Audio capture channel
+│   │   │   ├── webcam.rs          # Camera capture channel
+│   │   │   ├── input.rs           # Mouse/keyboard channel
+│   │   │   ├── cursor.rs          # Cursor image capture
+│   │   │   └── segment_writer.rs  # HLS/fMP4 segment writing
+│   │   │
+│   │   ├── capture/               # Platform capture implementations
+│   │   │   ├── mod.rs
+│   │   │   ├── traits.rs
+│   │   │   ├── macos/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── screen.rs      # ScreenCaptureKit
+│   │   │   │   ├── audio.rs       # CoreAudio
+│   │   │   │   ├── webcam.rs      # AVFoundation
+│   │   │   │   ├── input.rs       # CGEvent
+│   │   │   │   └── cursor.rs      # CoreGraphics
+│   │   │   └── windows/
+│   │   │       ├── mod.rs
+│   │   │       ├── screen.rs
+│   │   │       ├── audio.rs
+│   │   │       ├── webcam.rs
+│   │   │       ├── input.rs
+│   │   │       └── cursor.rs
+│   │   │
+│   │   ├── processing/            # Video/audio processing
+│   │   │   ├── mod.rs
+│   │   │   ├── spring.rs          # Spring physics simulation
+│   │   │   ├── cursor_smooth.rs   # Cursor smoothing
+│   │   │   ├── zoom.rs            # Automatic zoom algorithm
+│   │   │   ├── effects.rs         # Visual effects
+│   │   │   └── compositor.rs      # Layer composition
+│   │   │
+│   │   ├── export/                # Video encoding
+│   │   │   ├── mod.rs
+│   │   │   ├── encoder.rs         # FFmpeg encoding
+│   │   │   ├── formats.rs         # MP4, GIF, WebM
+│   │   │   └── presets.rs         # Export presets
+│   │   │
+│   │   ├── project/               # Project management
+│   │   │   ├── mod.rs
+│   │   │   ├── bundle.rs          # .osp bundle read/write
+│   │   │   ├── schema.rs          # JSON schemas
+│   │   │   └── migration.rs       # Version migration
+│   │   │
+│   │   └── utils/
+│   │       ├── mod.rs
+│   │       ├── error.rs
+│   │       └── logging.rs
+│   │
+│   ├── Cargo.toml
+│   ├── tauri.conf.json
+│   └── build.rs
+│
+├── package.json
+├── tsconfig.json
+├── tailwind.config.js
+├── vite.config.ts
+├── README.md
+├── CONTRIBUTING.md
+└── LICENSE
+```
 
 ---
 
@@ -360,7 +833,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Video/Audio Processing
-ffmpeg-next = "7"           # FFmpeg bindings
+ffmpeg-next = "7"
 
 # Image Processing
 image = "0.25"
@@ -377,7 +850,6 @@ tracing-subscriber = "0.3"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"
 block2 = "0.5"
-screencapturekit = "0.3"    # If available, else raw bindings
 core-foundation = "0.9"
 core-graphics = "0.23"
 
@@ -388,6 +860,7 @@ windows = { version = "0.58", features = [
     "Win32_System_WinRT",
     "Win32_UI_WindowsAndMessaging",
     "Media_Audio",
+    "Media_Capture",
 ]}
 ```
 
@@ -399,6 +872,7 @@ windows = { version = "0.58", features = [
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "zustand": "^4.5.0",
+    "hls.js": "^1.5.0",
     "lucide-react": "^0.400.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
@@ -432,87 +906,113 @@ windows = { version = "0.58", features = [
 - [ ] Set up Tailwind CSS
 - [ ] Create basic app layout (3 views: Record, Edit, Export)
 - [ ] Set up GitHub Actions CI/CD
-- [ ] Configure ESLint + Prettier
-- [ ] Write initial documentation
+- [ ] Define TypeScript types for project format
+- [ ] Implement project bundle read/write
 
-**Deliverable:** App opens on macOS and Windows, shows placeholder UI
+**Deliverable:** App opens, can create/save empty projects
 
-### Phase 1: Screen Capture POC (Weeks 2-3)
+### Phase 1: Multi-Channel Recording Infrastructure (Weeks 2-3)
 
-**Goal:** Capture screen and save as video
+**Goal:** Recording coordinator with segment writing
 
-- [ ] Implement screen capture trait
-- [ ] macOS: ScreenCaptureKit implementation
-- [ ] Windows: Windows.Graphics.Capture implementation
-- [ ] List available screens/windows
-- [ ] Capture frames to buffer
-- [ ] Basic FFmpeg encoding to MP4
+- [ ] Implement channel trait and coordinator
+- [ ] Implement HLS/fMP4 segment writer
+- [ ] macOS: ScreenCaptureKit screen capture channel
+- [ ] Windows: Windows.Graphics.Capture channel
+- [ ] Generate m3u8 playlists
 - [ ] Simple UI: source picker, record button
 
-**Deliverable:** Can record screen and save MP4 file
+**Deliverable:** Can record screen to segmented fMP4
 
-### Phase 2: Audio Capture (Week 4)
+### Phase 2: Audio Channels (Week 4)
 
-**Goal:** Add audio recording
+**Goal:** Add audio recording channels
 
-- [ ] Implement audio capture trait
-- [ ] macOS: CoreAudio/AVFoundation microphone
-- [ ] macOS: ScreenCaptureKit system audio
+- [ ] macOS: System audio channel (ScreenCaptureKit)
+- [ ] macOS: Microphone channel (AVFoundation)
+- [ ] Windows: WASAPI system audio loopback
 - [ ] Windows: WASAPI microphone
-- [ ] Windows: WASAPI loopback
-- [ ] Audio/video synchronization
+- [ ] Audio/video timestamp synchronization
 - [ ] Audio level meters in UI
 
-**Deliverable:** Record screen with microphone and system audio
+**Deliverable:** Record screen with synced audio
 
-### Phase 3: Cursor Tracking (Week 5)
+### Phase 3: Input Tracking Channel (Week 5)
 
-**Goal:** Track and record cursor data
+**Goal:** High-frequency input capture
 
-- [ ] Capture cursor position during recording
-- [ ] Capture click events
-- [ ] Capture cursor image/type
-- [ ] Store as metadata alongside video
-- [ ] Visualize cursor trail in preview
+- [ ] macOS: CGEvent mouse position tracking
+- [ ] macOS: CGEvent keyboard tracking
+- [ ] Windows: Win32 input tracking
+- [ ] JSON buffer and periodic flush
+- [ ] Capture cursor images to PNG
+- [ ] Store cursor metadata
 
-**Deliverable:** Cursor data captured and stored with recording
+**Deliverable:** Full input tracking during recording
 
-### Phase 4: Automatic Zoom (Weeks 6-7)
+### Phase 4: Webcam Channel (Week 6)
 
-**Goal:** Implement the signature feature
+**Goal:** Camera recording
 
-- [ ] Zoom detection algorithm (click-based triggers)
-- [ ] Smooth zoom transitions (easing functions)
-- [ ] Configurable zoom levels
-- [ ] Preview zoom in editor
-- [ ] Apply zoom during export
+- [ ] macOS: AVFoundation webcam capture
+- [ ] Windows: MediaCapture webcam
+- [ ] Camera preview in UI
+- [ ] Camera device selection
 
-**Deliverable:** Automatic zoom working in exports
+**Deliverable:** Record with webcam overlay
 
-### Phase 5: Cursor Smoothing (Week 8)
+### Phase 5: Cursor Smoothing (Week 7)
 
-**Goal:** Transform jerky cursor into smooth movement
+**Goal:** Smooth cursor movement in playback
 
-- [ ] Cursor interpolation algorithm
-- [ ] Configurable smoothing intensity
-- [ ] Handle edge cases (teleporting cursor)
+- [ ] Implement spring physics simulation
+- [ ] Read mouse moves from JSON
+- [ ] Interpolate positions at output framerate
+- [ ] Handle teleporting cursor
 - [ ] Preview smoothing in editor
+- [ ] Configurable smoothing intensity
 
-**Deliverable:** Smooth cursor movement in exports
+**Deliverable:** Smooth cursor in preview/export
 
-### Phase 6: Basic Editor (Weeks 9-10)
+### Phase 6: Automatic Zoom (Week 8)
+
+**Goal:** Click-based automatic zoom
+
+- [ ] Click detection from JSON data
+- [ ] Click grouping algorithm
+- [ ] Zoom region calculation
+- [ ] Spring physics for zoom transitions
+- [ ] Snap to edges
+- [ ] Zoom range UI in timeline
+
+**Deliverable:** Automatic zoom working
+
+### Phase 7: Basic Editor (Weeks 9-10)
 
 **Goal:** Timeline-based editing
 
+- [ ] HLS.js player for segment playback
 - [ ] Timeline component with thumbnails
 - [ ] Playhead and seeking
-- [ ] Trim start/end
-- [ ] Cut and remove sections
+- [ ] Trim start/end (adjust recording range)
+- [ ] Cut and remove sections (slices)
 - [ ] Undo/redo system
 
 **Deliverable:** Basic non-destructive editing
 
-### Phase 7: Styling System (Week 11)
+### Phase 8: Layout System (Week 11)
+
+**Goal:** Camera/screen arrangement
+
+- [ ] Layout keyframe data structure
+- [ ] Layout transition animations
+- [ ] Camera position/size controls
+- [ ] Layout presets (full screen, picture-in-picture, etc.)
+- [ ] Real-time preview
+
+**Deliverable:** Configurable camera layouts
+
+### Phase 9: Styling System (Week 12)
 
 **Goal:** Backgrounds and visual polish
 
@@ -522,21 +1022,22 @@ windows = { version = "0.58", features = [
 - [ ] Drop shadow
 - [ ] Real-time preview
 
-**Deliverable:** Styled output with customizable appearance
+**Deliverable:** Styled output
 
-### Phase 8: Export System (Week 12)
+### Phase 10: Export System (Week 13)
 
 **Goal:** Production-ready export
 
+- [ ] Read all segments and stitch
+- [ ] Apply effects pipeline (zoom, smooth, composite)
 - [ ] MP4 export with quality options
 - [ ] GIF export with optimization
-- [ ] Resolution and frame rate options
 - [ ] Progress indication
 - [ ] Hardware acceleration
 
-**Deliverable:** Export polished videos in multiple formats
+**Deliverable:** Export polished videos
 
-### Phase 9: Polish & MVP Release (Weeks 13-14)
+### Phase 11: Polish & MVP Release (Week 14)
 
 **Goal:** Ship it!
 
@@ -552,42 +1053,30 @@ windows = { version = "0.58", features = [
 
 ## Open Questions
 
-These need community input before implementation:
+### 1. Segment Duration
 
-### 1. Project File Format
+Current plan: 2 seconds
+- Shorter = more files, more overhead, finer crash recovery
+- Longer = fewer files, less overhead, coarser recovery
 
-**Options:**
-- **A) Custom binary format** - Smaller, faster, but proprietary
-- **B) JSON + assets folder** - Human-readable, easier to debug
-- **C) SQLite database** - Queryable, but overkill?
+**Decision needed:** Stick with 2s or adjust?
 
-**Recommendation:** JSON + assets folder for transparency
+### 2. Input Capture Rate
 
-### 2. Recording Storage
+Current plan: Display refresh rate (~120Hz)
+- Higher = smoother cursor, larger files
+- Lower = smaller files, potentially jerky cursor
 
-**Options:**
-- **A) Record to memory, save on stop** - Simplest, but limited by RAM
-- **B) Record directly to disk** - Handles long recordings, more complex
-- **C) Hybrid** - Memory buffer with disk spillover
+**Decision needed:** Fixed rate or adaptive?
 
-**Recommendation:** Start with A, implement B for long recordings
+### 3. Cursor Image Capture
 
-### 3. Preview Rendering
+Options:
+- Capture all unique cursors encountered
+- Only capture on cursor change
+- Pre-bundle common system cursors
 
-**Options:**
-- **A) Re-render on every change** - Always accurate, CPU intensive
-- **B) Cache rendered segments** - Faster, complex cache invalidation
-- **C) Lower quality preview** - Fast, quality mismatch with export
-
-**Recommendation:** Start with C, optimize with B later
-
-### 4. Webcam Recording
-
-**Options:**
-- **A) Record as separate track** - Flexible, larger files
-- **B) Composite in real-time** - Simpler, less flexible post-recording
-
-**Recommendation:** A for flexibility
+**Decision needed:** Balance file size vs accuracy
 
 ---
 
@@ -599,6 +1088,7 @@ These need community input before implementation:
 - Node.js 20+
 - Rust 1.75+
 - Git
+- FFmpeg
 
 **macOS:**
 - Xcode Command Line Tools
@@ -619,7 +1109,7 @@ cd open-screenstudio
 # Install Node dependencies
 npm install
 
-# Install Rust dependencies (automatic via Cargo)
+# Install Rust dependencies
 cd src-tauri && cargo fetch && cd ..
 
 # Run in development mode
@@ -629,33 +1119,14 @@ npm run tauri dev
 ### Development Commands
 
 ```bash
-# Start development server with hot reload
-npm run tauri dev
-
-# Build for production
-npm run tauri build
-
-# Run frontend only (for UI development)
-npm run dev
-
-# Lint and format
-npm run lint
-npm run format
-
-# Run tests
-npm run test              # Frontend tests
-cd src-tauri && cargo test # Backend tests
+npm run tauri dev      # Development with hot reload
+npm run tauri build    # Production build
+npm run dev            # Frontend only
+npm run lint           # Lint code
+npm run format         # Format code
+npm run test           # Frontend tests
+cd src-tauri && cargo test  # Backend tests
 ```
-
-### First Contribution
-
-1. Pick an issue labeled `good first issue`
-2. Comment that you're working on it
-3. Fork and create a feature branch
-4. Make your changes
-5. Submit a PR
-
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for detailed guidelines.
 
 ---
 
@@ -666,7 +1137,5 @@ This technical plan is open for discussion. We want to hear from you:
 - **Disagree with a decision?** Open an issue explaining your concerns
 - **Have experience with these technologies?** Share your insights
 - **See a potential problem?** Let us know before we hit it
-
-The best time to influence architecture is now, before we write the code.
 
 **Start a discussion:** [GitHub Discussions](https://github.com/crafter-station/open-screenstudio/discussions)
