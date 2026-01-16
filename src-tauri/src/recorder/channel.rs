@@ -11,25 +11,28 @@ use thiserror::Error;
 pub enum RecordingError {
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
-    
+
     #[error("Device not found: {0}")]
     DeviceNotFound(String),
-    
+
     #[error("Already recording")]
     AlreadyRecording,
-    
+
     #[error("Not recording")]
     NotRecording,
-    
+
+    #[error("Capture error: {0}")]
+    CaptureError(String),
+
     #[error("Encoding error: {0}")]
     EncodingError(String),
-    
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-    
+
     #[error("Platform error: {0}")]
     PlatformError(String),
-    
+
     #[error("Configuration error: {0}")]
     ConfigurationError(String),
 }
