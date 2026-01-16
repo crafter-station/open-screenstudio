@@ -47,6 +47,8 @@ export default function RecordingView() {
   const [recordingTime, setRecordingTime] = useState(0);
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
+  const [systemAudioAvailable, setSystemAudioAvailable] =
+    useState<boolean>(true);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -85,6 +87,17 @@ export default function RecordingView() {
         }
       } catch (err) {
         console.error("Failed to load audio devices:", err);
+      }
+
+      // Check system audio availability
+      try {
+        const available = await invoke<boolean>("check_system_audio_available");
+        setSystemAudioAvailable(available);
+        if (!available) {
+          setSystemAudioEnabled(false);
+        }
+      } catch (err) {
+        console.error("Failed to check system audio:", err);
       }
 
       // Check permission
@@ -389,20 +402,33 @@ export default function RecordingView() {
 
               <button
                 type="button"
-                onClick={() => setSystemAudioEnabled(!systemAudioEnabled)}
+                onClick={() => {
+                  if (!systemAudioAvailable) {
+                    window.open(
+                      "https://existential.audio/blackhole/",
+                      "_blank",
+                    );
+                    return;
+                  }
+                  setSystemAudioEnabled(!systemAudioEnabled);
+                }}
                 disabled={recordingState !== "idle"}
                 className={`p-2 rounded-md transition-colors ${
-                  systemAudioEnabled
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-muted"
+                  !systemAudioAvailable
+                    ? "text-yellow-500 hover:bg-yellow-500/10"
+                    : systemAudioEnabled
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-muted"
                 } disabled:opacity-50`}
                 title={
-                  systemAudioEnabled
-                    ? "Disable System Audio"
-                    : "Enable System Audio"
+                  !systemAudioAvailable
+                    ? "System audio requires BlackHole. Click to install."
+                    : systemAudioEnabled
+                      ? "Disable System Audio"
+                      : "Enable System Audio"
                 }
               >
-                {systemAudioEnabled ? (
+                {systemAudioEnabled && systemAudioAvailable ? (
                   <Volume2 className="w-4 h-4" />
                 ) : (
                   <VolumeX className="w-4 h-4" />

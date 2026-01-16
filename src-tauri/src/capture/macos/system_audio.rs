@@ -34,6 +34,11 @@ fn is_loopback_device(name: &str) -> bool {
     LOOPBACK_DEVICES.iter().any(|&d| name.contains(d))
 }
 
+/// Check if system audio capture is available (loopback device found)
+pub fn is_system_audio_available() -> bool {
+    find_loopback_device().is_some()
+}
+
 /// Get available system audio loopback devices
 pub fn get_system_audio_devices() -> Vec<AudioDeviceInfo> {
     let host = cpal::default_host();

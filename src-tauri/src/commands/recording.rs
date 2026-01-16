@@ -27,6 +27,26 @@ pub async fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
     Ok(get_audio_input_devices())
 }
 
+/// Check if system audio capture is available
+#[tauri::command]
+pub async fn check_system_audio_available() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        Ok(crate::capture::macos::system_audio::is_system_audio_available())
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        // Windows WASAPI loopback is generally available
+        Ok(true)
+    }
+    
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        Ok(false)
+    }
+}
+
 /// Get list of available displays
 #[tauri::command]
 pub async fn get_displays() -> Result<Vec<DisplayInfo>, String> {
