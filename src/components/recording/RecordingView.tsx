@@ -12,6 +12,7 @@ import {
   CameraOff,
   Volume2,
   VolumeX,
+  AlertTriangle,
   Settings,
   AlertCircle,
 } from "lucide-react";
@@ -428,7 +429,12 @@ export default function RecordingView() {
                       : "Enable System Audio"
                 }
               >
-                {systemAudioEnabled && systemAudioAvailable ? (
+                {!systemAudioAvailable ? (
+                  <div className="relative">
+                    <Volume2 className="w-4 h-4" />
+                    <AlertTriangle className="w-2.5 h-2.5 absolute -top-1 -right-1 text-yellow-500" />
+                  </div>
+                ) : systemAudioEnabled ? (
                   <Volume2 className="w-4 h-4" />
                 ) : (
                   <VolumeX className="w-4 h-4" />
