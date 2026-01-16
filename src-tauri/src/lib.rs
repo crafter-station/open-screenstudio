@@ -45,6 +45,7 @@ pub fn run() {
             commands::system::get_system_info,
             // Recording commands
             commands::recording::get_displays,
+            commands::recording::get_audio_devices,
             commands::recording::check_screen_permission,
             commands::recording::request_screen_permission,
             commands::recording::start_recording,

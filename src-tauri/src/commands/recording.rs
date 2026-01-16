@@ -1,6 +1,7 @@
 //! Recording-related Tauri commands
 
-use crate::capture::traits::{DisplayInfo, has_screen_recording_permission, request_screen_recording_permission};
+use crate::capture::audio::get_audio_input_devices;
+use crate::capture::traits::{AudioDeviceInfo, DisplayInfo, has_screen_recording_permission, request_screen_recording_permission};
 use crate::recorder::state::{RecordingConfig, RecordingResult as RecordingOutput, RecordingState};
 use crate::recorder::RecordingCoordinator;
 use std::sync::Arc;
@@ -18,6 +19,12 @@ impl Default for RecorderState {
             coordinator: Arc::new(Mutex::new(RecordingCoordinator::new())),
         }
     }
+}
+
+/// Get list of available audio input devices (microphones)
+#[tauri::command]
+pub async fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
+    Ok(get_audio_input_devices())
 }
 
 /// Get list of available displays
@@ -78,6 +85,14 @@ pub async fn start_recording(
     {
         let display_channel = Box::new(crate::capture::windows::screen::DisplayCaptureChannel::new(config.display_id));
         coordinator.add_channel(display_channel);
+    }
+    
+    // Add microphone channel if enabled
+    if config.capture_microphone {
+        let mic_channel = Box::new(crate::capture::audio::MicrophoneCaptureChannel::new(
+            config.microphone_device_id.clone(),
+        ));
+        coordinator.add_channel(mic_channel);
     }
     
     coordinator.start(config).await.map_err(|e| e.to_string())
