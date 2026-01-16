@@ -9,16 +9,189 @@ import {
   Undo,
   Redo,
   Maximize,
+  Bug,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useProjectStore } from "../../stores/projectStore";
+import { CursorOverlay } from "./CursorOverlay";
+import {
+  CursorSmoother,
+  type MouseMoveEvent,
+  type SmoothedPosition,
+} from "../../processing/cursorSmoothing";
+import {
+  DEFAULT_SPRING_CONFIG,
+  type SpringConfig,
+} from "../../processing/spring";
+
+// Mock cursor data for demonstration (in production, this comes from recording)
+const MOCK_CURSOR_INFO = {
+  default: {
+    id: "default",
+    imagePath: "",
+    hotspotX: 0,
+    hotspotY: 0,
+    width: 24,
+    height: 24,
+  },
+};
 
 export default function EditorView() {
   const { project } = useProjectStore();
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, _setCurrentTime] = useState(0);
-  const [duration, _setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, _setDuration] = useState(10000); // 10 seconds for demo
   const [timelineZoom, setTimelineZoom] = useState(1);
+
+  // Cursor smoothing state
+  const [cursorSize, setCursorSize] = useState(1.5);
+  const [smoothingEnabled, setSmoothingEnabled] = useState(true);
+  const [showDebug, setShowDebug] = useState(false);
+  const [springConfig, setSpringConfig] = useState<SpringConfig>(
+    DEFAULT_SPRING_CONFIG,
+  );
+  const [cursorPosition, setCursorPosition] = useState<SmoothedPosition | null>(
+    null,
+  );
+
+  // Refs for animation
+  const smootherRef = useRef<CursorSmoother | null>(null);
+  const animationRef = useRef<number | null>(null);
+  const lastTimeRef = useRef<number>(0);
+  const currentTimeRef = useRef<number>(0);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [previewSize, setPreviewSize] = useState({ width: 800, height: 450 });
+
+  // Initialize cursor smoother
+  useEffect(() => {
+    if (smoothingEnabled) {
+      smootherRef.current = new CursorSmoother(springConfig);
+    } else {
+      smootherRef.current = null;
+    }
+  }, [smoothingEnabled, springConfig]);
+
+  // Update spring config when parameters change
+  const updateSpringConfig = useCallback((updates: Partial<SpringConfig>) => {
+    setSpringConfig((prev) => {
+      const newConfig = { ...prev, ...updates };
+      if (smootherRef.current) {
+        smootherRef.current.updateConfig(newConfig);
+      }
+      return newConfig;
+    });
+  }, []);
+
+  // Measure preview container size
+  useEffect(() => {
+    const updateSize = () => {
+      if (previewRef.current) {
+        const rect = previewRef.current.getBoundingClientRect();
+        setPreviewSize({ width: rect.width, height: rect.height });
+      }
+    };
+    updateSize();
+    window.addEventListener("resize", updateSize);
+    return () => window.removeEventListener("resize", updateSize);
+  }, []);
+
+  // Demo animation loop - simulate cursor movement for testing
+  useEffect(() => {
+    if (!isPlaying) {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+      lastTimeRef.current = 0;
+      return;
+    }
+
+    const videoWidth = 1920;
+    const videoHeight = 1080;
+
+    const animate = (timestamp: number) => {
+      if (!lastTimeRef.current) {
+        lastTimeRef.current = timestamp;
+      }
+      const deltaMs = Math.min(timestamp - lastTimeRef.current, 100); // Cap at 100ms to prevent jumps
+      lastTimeRef.current = timestamp;
+
+      // Update current time using ref to avoid stale closure
+      currentTimeRef.current += deltaMs;
+      if (currentTimeRef.current > duration) {
+        currentTimeRef.current = 0;
+        // Reset smoother when looping
+        if (smootherRef.current) {
+          smootherRef.current.reset(videoWidth / 2, videoHeight / 2);
+        }
+      }
+
+      // Update state for display (throttled to avoid excessive re-renders)
+      setCurrentTime(currentTimeRef.current);
+
+      // Generate demo cursor movement (circular motion with jitter)
+      const time = currentTimeRef.current / 1000;
+      const centerX = videoWidth / 2;
+      const centerY = videoHeight / 2;
+      const radius = 300;
+      const jitter = 30; // Always add some jitter to show smoothing effect
+
+      const rawX =
+        centerX +
+        Math.cos(time * 1.5) * radius +
+        (Math.random() - 0.5) * jitter;
+      const rawY =
+        centerY +
+        Math.sin(time * 1.5) * radius +
+        (Math.random() - 0.5) * jitter;
+
+      const rawMove: MouseMoveEvent = {
+        x: rawX,
+        y: rawY,
+        cursorId: "default",
+        processTimeMs: currentTimeRef.current,
+      };
+
+      // Apply smoothing if enabled
+      let newPosition: SmoothedPosition;
+      if (smootherRef.current && smoothingEnabled) {
+        newPosition = smootherRef.current.update(rawMove, deltaMs / 1000);
+      } else {
+        // No smoothing - use raw position directly
+        newPosition = {
+          x: rawX,
+          y: rawY,
+          rawX,
+          rawY,
+          cursorId: "default",
+        };
+      }
+
+      setCursorPosition(newPosition);
+
+      // Debug: log every 60 frames (~1 second)
+      if (
+        Math.floor(currentTimeRef.current / 1000) !==
+        Math.floor((currentTimeRef.current - deltaMs) / 1000)
+      ) {
+        console.log("Cursor position:", {
+          time: currentTimeRef.current.toFixed(0),
+          x: newPosition.x.toFixed(0),
+          y: newPosition.y.toFixed(0),
+        });
+      }
+
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    animationRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [isPlaying, duration, smoothingEnabled]);
 
   const formatTime = (ms: number): string => {
     const totalSeconds = Math.floor(ms / 1000);
@@ -113,13 +286,30 @@ export default function EditorView() {
         <div className="flex-1 flex flex-col">
           {/* Video Preview */}
           <div className="flex-1 flex items-center justify-center bg-muted/30 p-4">
-            <div className="relative w-full max-w-3xl aspect-video bg-black rounded-lg overflow-hidden">
+            <div
+              ref={previewRef}
+              className="relative w-full max-w-3xl aspect-video bg-black rounded-lg overflow-hidden"
+            >
               {/* Preview content will be rendered here */}
               <div className="absolute inset-0 flex items-center justify-center">
                 <p className="text-muted-foreground text-sm">
-                  Video preview will be rendered here
+                  {isPlaying
+                    ? "Cursor smoothing demo active"
+                    : "Press play to see cursor smoothing demo"}
                 </p>
               </div>
+
+              {/* Cursor Overlay */}
+              <CursorOverlay
+                position={cursorPosition}
+                cursors={MOCK_CURSOR_INFO}
+                cursorSize={cursorSize}
+                videoWidth={1920}
+                videoHeight={1080}
+                containerWidth={previewSize.width}
+                containerHeight={previewSize.height}
+                showDebug={showDebug}
+              />
 
               {/* Fullscreen button */}
               <button
@@ -128,6 +318,20 @@ export default function EditorView() {
                 title="Fullscreen"
               >
                 <Maximize className="w-4 h-4" />
+              </button>
+
+              {/* Debug toggle */}
+              <button
+                type="button"
+                onClick={() => setShowDebug(!showDebug)}
+                className={`absolute top-2 left-2 p-1.5 rounded transition-colors ${
+                  showDebug
+                    ? "bg-red-500/70 text-white"
+                    : "bg-black/50 hover:bg-black/70 text-white"
+                }`}
+                title={showDebug ? "Hide debug info" : "Show debug info"}
+              >
+                <Bug className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -187,22 +391,111 @@ export default function EditorView() {
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
                   Cursor
                 </h4>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <label className="flex items-center justify-between text-sm">
                     <span>Size</span>
-                    <input
-                      type="range"
-                      min="0.5"
-                      max="3"
-                      step="0.1"
-                      defaultValue="1.5"
-                      className="w-24"
-                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="3"
+                        step="0.1"
+                        value={cursorSize}
+                        onChange={(e) =>
+                          setCursorSize(parseFloat(e.target.value))
+                        }
+                        className="w-20"
+                      />
+                      <span className="text-xs text-muted-foreground w-8">
+                        {cursorSize.toFixed(1)}x
+                      </span>
+                    </div>
                   </label>
                   <label className="flex items-center justify-between text-sm">
                     <span>Smoothing</span>
-                    <input type="checkbox" defaultChecked className="rounded" />
+                    <input
+                      type="checkbox"
+                      checked={smoothingEnabled}
+                      onChange={(e) => setSmoothingEnabled(e.target.checked)}
+                      className="rounded"
+                    />
                   </label>
+
+                  {/* Smoothing parameters - only show when enabled */}
+                  {smoothingEnabled && (
+                    <div className="space-y-2 pt-2 border-t border-border">
+                      <label className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Stiffness</span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="range"
+                            min="100"
+                            max="800"
+                            step="10"
+                            value={springConfig.stiffness}
+                            onChange={(e) =>
+                              updateSpringConfig({
+                                stiffness: parseFloat(e.target.value),
+                              })
+                            }
+                            className="w-20"
+                          />
+                          <span className="text-xs text-muted-foreground w-8">
+                            {springConfig.stiffness}
+                          </span>
+                        </div>
+                      </label>
+                      <label className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Damping</span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="range"
+                            min="20"
+                            max="150"
+                            step="5"
+                            value={springConfig.damping}
+                            onChange={(e) =>
+                              updateSpringConfig({
+                                damping: parseFloat(e.target.value),
+                              })
+                            }
+                            className="w-20"
+                          />
+                          <span className="text-xs text-muted-foreground w-8">
+                            {springConfig.damping}
+                          </span>
+                        </div>
+                      </label>
+                      <label className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Mass</span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="range"
+                            min="1"
+                            max="10"
+                            step="0.5"
+                            value={springConfig.mass}
+                            onChange={(e) =>
+                              updateSpringConfig({
+                                mass: parseFloat(e.target.value),
+                              })
+                            }
+                            className="w-20"
+                          />
+                          <span className="text-xs text-muted-foreground w-8">
+                            {springConfig.mass}
+                          </span>
+                        </div>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setSpringConfig(DEFAULT_SPRING_CONFIG)}
+                        className="text-xs text-muted-foreground hover:text-foreground underline"
+                      >
+                        Reset to defaults
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 

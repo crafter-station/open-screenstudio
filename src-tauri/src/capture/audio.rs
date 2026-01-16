@@ -305,13 +305,33 @@ impl RecordingChannel for MicrophoneCaptureChannel {
             let sample_format = config.sample_format();
             let stream_config: StreamConfig = config.into();
 
+            // Log the actual stream configuration for debugging
+            tracing::info!(
+                "Microphone stream config: format={:?}, sample_rate={}, channels={}",
+                sample_format,
+                stream_config.sample_rate.0,
+                stream_config.channels
+            );
+
+            // Callback counter for diagnostic logging
+            let callback_count = Arc::new(AtomicU64::new(0));
+
             let stream = match sample_format {
                 SampleFormat::F32 => {
                     let encoder_clone = encoder.clone();
                     let is_rec = is_recording.clone();
+                    let cc = callback_count.clone();
                     device.build_input_stream(
                         &stream_config,
                         move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                            let count = cc.fetch_add(1, Ordering::Relaxed);
+                            // Log first callback and then every 500th to confirm mic is working
+                            if count == 0 {
+                                tracing::info!("Microphone: first callback received - capture working!");
+                            } else if count % 500 == 0 {
+                                tracing::debug!("Microphone: {} callbacks, {} samples this batch", count, data.len());
+                            }
+                            
                             if is_rec.load(Ordering::Relaxed) {
                                 let bytes: Vec<u8> = data
                                     .iter()
@@ -320,16 +340,24 @@ impl RecordingChannel for MicrophoneCaptureChannel {
                                 encoder_clone.write_samples(&bytes);
                             }
                         },
-                        |err| tracing::error!("Audio stream error: {}", err),
+                        |err| tracing::error!("Microphone stream error: {}", err),
                         None,
                     )
                 }
                 SampleFormat::I16 => {
                     let encoder_clone = encoder.clone();
                     let is_rec = is_recording.clone();
+                    let cc = callback_count.clone();
                     device.build_input_stream(
                         &stream_config,
                         move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                            let count = cc.fetch_add(1, Ordering::Relaxed);
+                            if count == 0 {
+                                tracing::info!("Microphone: first callback received - capture working!");
+                            } else if count % 500 == 0 {
+                                tracing::debug!("Microphone: {} callbacks, {} samples this batch", count, data.len());
+                            }
+                            
                             if is_rec.load(Ordering::Relaxed) {
                                 let bytes: Vec<u8> = data
                                     .iter()
@@ -339,16 +367,24 @@ impl RecordingChannel for MicrophoneCaptureChannel {
                                 encoder_clone.write_samples(&bytes);
                             }
                         },
-                        |err| tracing::error!("Audio stream error: {}", err),
+                        |err| tracing::error!("Microphone stream error: {}", err),
                         None,
                     )
                 }
                 SampleFormat::U16 => {
                     let encoder_clone = encoder.clone();
                     let is_rec = is_recording.clone();
+                    let cc = callback_count.clone();
                     device.build_input_stream(
                         &stream_config,
                         move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                            let count = cc.fetch_add(1, Ordering::Relaxed);
+                            if count == 0 {
+                                tracing::info!("Microphone: first callback received - capture working!");
+                            } else if count % 500 == 0 {
+                                tracing::debug!("Microphone: {} callbacks, {} samples this batch", count, data.len());
+                            }
+                            
                             if is_rec.load(Ordering::Relaxed) {
                                 let bytes: Vec<u8> = data
                                     .iter()
@@ -358,12 +394,12 @@ impl RecordingChannel for MicrophoneCaptureChannel {
                                 encoder_clone.write_samples(&bytes);
                             }
                         },
-                        |err| tracing::error!("Audio stream error: {}", err),
+                        |err| tracing::error!("Microphone stream error: {}", err),
                         None,
                     )
                 }
                 _ => {
-                    tracing::error!("Unsupported sample format: {:?}", sample_format);
+                    tracing::error!("Unsupported microphone sample format: {:?}", sample_format);
                     return;
                 }
             };
@@ -377,11 +413,11 @@ impl RecordingChannel for MicrophoneCaptureChannel {
             };
 
             if let Err(e) = stream.play() {
-                tracing::error!("Failed to start audio stream: {}", e);
+                tracing::error!("Failed to start microphone stream: {}", e);
                 return;
             }
 
-            tracing::info!("Audio stream started");
+            tracing::info!("Microphone audio stream started successfully");
 
             // Keep thread alive while recording
             while is_recording.load(Ordering::SeqCst) {
@@ -389,7 +425,7 @@ impl RecordingChannel for MicrophoneCaptureChannel {
             }
 
             // Stream is dropped here, stopping capture
-            tracing::info!("Audio stream stopped");
+            tracing::info!("Microphone audio stream stopped");
         });
 
         *self.stream_handle.lock() = Some(handle);

@@ -4,9 +4,11 @@
 
 pub mod screen;
 pub mod system_audio;
+pub mod input;
 
 pub use screen::*;
 pub use system_audio::*;
+pub use input::*;
 
 /// Windows doesn't require explicit permission for screen capture
 pub mod permissions {

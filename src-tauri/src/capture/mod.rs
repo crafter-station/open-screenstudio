@@ -4,6 +4,7 @@
 
 pub mod traits;
 pub mod audio;
+pub mod input;
 
 #[cfg(target_os = "macos")]
 pub mod macos;
@@ -19,3 +20,6 @@ pub use traits::{has_screen_recording_permission, request_screen_recording_permi
 
 // Re-export audio functions
 pub use audio::{get_audio_input_devices, MicrophoneCaptureChannel};
+
+// Re-export input channel
+pub use input::InputTrackingChannel;

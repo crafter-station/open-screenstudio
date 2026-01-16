@@ -13,16 +13,20 @@
     "withGlobalTauri": false,
     "windows": [
       {
+        "label": "toolbar",
         "title": "Open ScreenStudio",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 900,
-        "minHeight": 600,
-        "resizable": true,
+        "width": 720,
+        "height": 72,
+        "minWidth": 720,
+        "minHeight": 72,
+        "maxHeight": 72,
+        "resizable": false,
         "fullscreen": false,
-        "decorations": true,
-        "transparent": false,
-        "center": true
+        "decorations": false,
+        "transparent": true,
+        "center": true,
+        "alwaysOnTop": true,
+        "visible": true
       }
     ],
     "security": {

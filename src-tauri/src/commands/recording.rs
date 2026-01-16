@@ -107,6 +107,14 @@ pub async fn start_recording(
         coordinator.add_channel(display_channel);
     }
     
+    // Add input tracking channel (always-on for MVP)
+    // Note: Windows implementation is currently stubbed.
+    #[cfg(target_os = "macos")]
+    {
+        let input_channel = Box::new(crate::capture::InputTrackingChannel::new(config.display_id));
+        coordinator.add_channel(input_channel);
+    }
+
     // Add microphone channel if enabled
     if config.capture_microphone {
         let mic_channel = Box::new(crate::capture::audio::MicrophoneCaptureChannel::new(
@@ -119,7 +127,7 @@ pub async fn start_recording(
     if config.capture_system_audio {
         #[cfg(target_os = "macos")]
         {
-            let system_audio_channel = Box::new(crate::capture::macos::system_audio::SystemAudioCaptureChannel::new());
+            let system_audio_channel = Box::new(crate::capture::macos::system_audio::SystemAudioCaptureChannel::new(config.display_id));
             coordinator.add_channel(system_audio_channel);
         }
         

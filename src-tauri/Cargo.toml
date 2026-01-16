@@ -42,6 +42,7 @@ chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
 parking_lot = "0.12"
 tempfile = "3"
+urlencoding = "2"
 
 # Audio
 cpal = "0.15"
@@ -49,13 +50,15 @@ cpal = "0.15"
 # Platform: macOS
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"
-objc2-foundation = "0.2"
-objc2-app-kit = "0.2"
+objc2-foundation = { version = "0.2", features = ["NSDictionary", "NSData", "NSGeometry", "NSObject"] }
+objc2-app-kit = { version = "0.2", features = ["NSCursor", "NSEvent", "NSImage", "NSBitmapImageRep", "NSImageRep"] }
 block2 = "0.5"
 core-foundation = "0.10"
 core-graphics = "0.24"
 cocoa = "0.26"
 dispatch = "0.2"
+# ScreenCaptureKit for native system audio capture (macOS 12.3+)
+screencapturekit = "1.5"
 # Note: screencapturekit crate has Swift runtime issues on some systems
 # Using CGWindowListCreateImage for now as a simpler fallback
 

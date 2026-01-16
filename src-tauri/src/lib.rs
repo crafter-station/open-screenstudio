@@ -5,12 +5,12 @@
 
 pub mod capture;
 pub mod commands;
+pub mod processing;
 pub mod project;
 pub mod recorder;
 pub mod utils;
 
 // These modules will be implemented in later phases
-// pub mod processing;
 // pub mod export;
 
 use commands::recording::RecorderState;
@@ -55,6 +55,17 @@ pub fn run() {
             commands::recording::resume_recording,
             commands::recording::get_recording_state,
             commands::recording::get_recording_duration,
+            // Processing commands
+            commands::processing::smooth_cursor,
+            commands::processing::process_cursor_smoothing,
+            commands::processing::get_default_spring_config,
+            // Window commands
+            commands::window::open_editor_window,
+            commands::window::close_toolbar_window,
+            commands::window::set_toolbar_visible,
+            commands::window::get_window_label,
+            commands::window::minimize_toolbar,
+            commands::window::restore_toolbar,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
