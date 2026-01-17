@@ -43,7 +43,9 @@ export default function EditorView() {
   const systemAudioRef = useRef<HTMLAudioElement>(null);
 
   // Cursor smoothing state
-  const [cursorSize] = useState(1.5);
+  // cursorSize is a multiplier on top of the natural cursor size
+  // 1.0 = same size as during recording, 1.5 = 50% larger for emphasis
+  const [cursorSize] = useState(1.0);
   const [smoothingEnabled] = useState(true);
   const [springConfig] = useState<SpringConfig>(DEFAULT_SPRING_CONFIG);
   const [cursorPosition, setCursorPosition] = useState<SmoothedPosition | null>(

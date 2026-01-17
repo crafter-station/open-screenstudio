@@ -94,9 +94,21 @@ export function CursorOverlay({
   const rawX = position.rawX * scale + offsetX;
   const rawY = position.rawY * scale + offsetY;
 
-  // Calculate cursor offset based on hotspot
-  const hotspotOffsetX = cursorInfo ? cursorInfo.hotspotX * cursorSize : 0;
-  const hotspotOffsetY = cursorInfo ? cursorInfo.hotspotY * cursorSize : 0;
+  // Calculate the final cursor scale:
+  // - Cursor images from macOS are captured at native pixel resolution (2x on Retina)
+  // - The cursorInfo.width/height are in logical points (e.g., 32x32)
+  // - The actual PNG is 2x that on Retina (e.g., 64x64 pixels)
+  // - We need to scale down to match the video's scale in the container
+  // - Then apply the user's cursorSize multiplier
+  //
+  // The cursor should appear at the same relative size as it did during recording.
+  // Since the video is scaled by `scale`, and cursor images are at video resolution,
+  // we scale the cursor by the same factor, then apply user size preference.
+  const cursorScale = scale * cursorSize;
+
+  // Calculate cursor offset based on hotspot (in scaled coordinates)
+  const hotspotOffsetX = cursorInfo ? cursorInfo.hotspotX * cursorScale : 0;
+  const hotspotOffsetY = cursorInfo ? cursorInfo.hotspotY * cursorScale : 0;
 
   // Check if we have a valid cursor image URL
   const hasValidCursorImage = !!cursorImageUrl;
@@ -112,9 +124,9 @@ export function CursorOverlay({
           style={{
             left: smoothedX - hotspotOffsetX,
             top: smoothedY - hotspotOffsetY,
-            transform: `scale(${cursorSize})`,
+            transform: `scale(${cursorScale})`,
             transformOrigin: "top left",
-            imageRendering: "pixelated",
+            imageRendering: "auto",
           }}
           draggable={false}
         />
@@ -127,8 +139,8 @@ export function CursorOverlay({
             position: "absolute",
             left: smoothedX,
             top: smoothedY,
-            width: 24 * cursorSize,
-            height: 24 * cursorSize,
+            width: 24 * cursorScale,
+            height: 24 * cursorScale,
             filter: "drop-shadow(1px 1px 2px rgba(0,0,0,0.5))",
           }}
         >
