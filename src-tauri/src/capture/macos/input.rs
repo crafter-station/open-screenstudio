@@ -212,7 +212,7 @@ fn capture_cursor_png(cursor: &Retained<NSCursor>, cursor_id: &str, cursors_dir:
     unsafe {
         let hotspot = cursor.hotSpot();
         let image: Retained<NSImage> = cursor.image();
-        let size = image.size();
+        let logical_size = image.size();  // Logical points (e.g., 32x32)
 
         let file_name = format!("{}.png", cursor_id);
         let image_path = cursors_dir.join(&file_name);
@@ -222,6 +222,24 @@ fn capture_cursor_png(cursor: &Retained<NSCursor>, cursor_id: &str, cursors_dir:
 
         // Convert TIFF NSData -> NSBitmapImageRep
         let bitmap = NSBitmapImageRep::imageRepWithData(&tiff_data)?;
+
+        // Get actual PIXEL dimensions of the bitmap (may be 2x on Retina)
+        // pixelsWide/pixelsHigh are inherited from NSImageRep
+        let pixel_width = bitmap.pixelsWide() as u32;
+        let pixel_height = bitmap.pixelsHigh() as u32;
+        
+        // Calculate scale factor from logical to pixel coordinates
+        // On Retina: logical_size might be 32x32, pixel size is 64x64, so scale = 2.0
+        let scale_x = if logical_size.width > 0.0 {
+            pixel_width as f64 / logical_size.width
+        } else {
+            1.0
+        };
+        let scale_y = if logical_size.height > 0.0 {
+            pixel_height as f64 / logical_size.height
+        } else {
+            1.0
+        };
 
         // Encode NSBitmapImageRep -> PNG NSData
         let props: Retained<NSDictionary<NSString, objc2::runtime::AnyObject>> = NSDictionary::dictionary();
@@ -239,13 +257,15 @@ fn capture_cursor_png(cursor: &Retained<NSCursor>, cursor_id: &str, cursors_dir:
             return None;
         }
 
+        // Store dimensions and hotspot in PIXEL coordinates (matching the PNG file)
+        // This ensures the playback side can use these values directly with the image
         Some(CursorInfo {
             id: cursor_id.to_string(),
             image_path: image_path.to_string_lossy().to_string(),
-            hotspot_x: hotspot.x,
-            hotspot_y: hotspot.y,
-            width: size.width as u32,
-            height: size.height as u32,
+            hotspot_x: hotspot.x * scale_x,  // Convert to pixel coordinates
+            hotspot_y: hotspot.y * scale_y,  // Convert to pixel coordinates
+            width: pixel_width,               // Actual PNG pixel width
+            height: pixel_height,             // Actual PNG pixel height
         })
     }
 }
