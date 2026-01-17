@@ -14,10 +14,13 @@ export interface SpringConfig {
   mass: number;
 }
 
+// High stiffness + damping for responsive cursor with minimal lag
+// This ensures the cursor reaches its target quickly while still
+// having smooth motion (no overshoot)
 export const DEFAULT_SPRING_CONFIG: SpringConfig = {
-  stiffness: 470,
-  damping: 70,
-  mass: 3,
+  stiffness: 800,
+  damping: 80,
+  mass: 1,
 };
 
 export interface SpringState {
