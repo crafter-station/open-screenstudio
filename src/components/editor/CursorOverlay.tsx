@@ -89,9 +89,12 @@ export function CursorOverlay({
   );
 
   // Convert video coordinates to container coordinates
-  const smoothedX = position.x * scale + offsetX;
+  // Note: On Retina displays, cursor X coordinates may need 2x scaling
+  // to match the video pixel coordinates
+  const retinaScale = 2; // TODO: Get this from recording metadata
+  const smoothedX = position.x * retinaScale * scale + offsetX;
   const smoothedY = position.y * scale + offsetY;
-  const rawX = position.rawX * scale + offsetX;
+  const rawX = position.rawX * retinaScale * scale + offsetX;
   const rawY = position.rawY * scale + offsetY;
 
   // Calculate the final cursor scale:
